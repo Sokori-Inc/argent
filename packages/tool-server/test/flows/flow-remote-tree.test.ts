@@ -16,7 +16,7 @@ import type { DeviceInfo, Registry } from "@argent/registry";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fetchFlowTree, supportsFlowTree } from "../../src/tools/flows/flow-tree";
+import { fetchFlowTree } from "../../src/tools/flows/flow-tree";
 import { createFlowAddStepTool } from "../../src/tools/flows/flow-add-step";
 import { flowStartRecordingTool } from "../../src/tools/flows/flow-start-recording";
 import { __resetRecordingsForTesting, parseFlow } from "../../src/tools/flows/flow-utils";
@@ -105,16 +105,15 @@ afterEach(async () => {
 });
 
 describe("a flow reads the full view hierarchy on a remote simulator", () => {
-  it("declares a tree source for the platform at all", () => {
+  it("resolves a remote udid to its own platform, which the source table keys on", () => {
     expect(resolveDevice(REMOTE).platform).toBe("ios-remote");
-    expect(supportsFlowTree("ios-remote")).toBe(true);
   });
 
   it("asks native devtools for the full hierarchy, not the trimmed describe tree", async () => {
     const tree = await readTree(resolveDevice(REMOTE), queries);
 
-    // `fetchTree` - the fallthrough that used to serve this platform - would
-    // have thrown before issuing any query at all.
+    // Before this platform had a source of its own, every read threw before
+    // issuing any query at all.
     expect(queries).toEqual([[APP, "ViewHierarchy.getFullHierarchy", expect.any(Object)]]);
     expect(tree.source).toBe("native-devtools");
     expect(JSON.stringify(tree.tree)).toContain("Log In");
