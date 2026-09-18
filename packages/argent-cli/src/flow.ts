@@ -50,6 +50,7 @@ export interface StepReport {
   artifacts?: Record<string, unknown>;
   scriptLog?: string;
   scriptLogTruncated?: boolean;
+  durationMs?: number;
 }
 
 export interface FlowReport {
@@ -62,6 +63,8 @@ export interface FlowReport {
   skipped: number;
   errored: number;
   steps: StepReport[];
+  startedAt?: number;
+  durationMs?: number;
 }
 
 const STATUS_GLYPH: Record<StepReport["status"], string> = {
@@ -84,6 +87,14 @@ const MAX_RENDER_DEPTH = 20;
 function stepIndent(depth: number | undefined): string {
   if (typeof depth !== "number" || !Number.isInteger(depth) || depth <= 0) return "";
   return "  ".repeat(Math.min(depth, MAX_RENDER_DEPTH));
+}
+
+function durationSuffix(ms: unknown): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return ` (${(tenths / 10).toFixed(1)}s)`;
+  const seconds = Math.round(ms / 1000);
+  return ` (${Math.floor(seconds / 60)}m ${seconds % 60}s)`;
 }
 
 function printHelp(toStderr = false): void {
@@ -239,7 +250,7 @@ export function renderStepLine(s: StepReport, n: number, topFlow: string): strin
   const label = what ? `${s.kind} ${what}` : s.kind;
   const reason = s.reason ? ` — ${s.reason}` : "";
   const glyph = s.status === "pass" && s.warning ? "⚠" : STATUS_GLYPH[s.status];
-  return `  ${glyph} ${String(n).padStart(2)} ${stepIndent(s.depth)}${label}${where}${reason}`;
+  return `  ${glyph} ${String(n).padStart(2)} ${stepIndent(s.depth)}${label}${where}${durationSuffix(s.durationMs)}${reason}`;
 }
 
 /**
@@ -278,7 +289,7 @@ export function renderSummary(report: FlowReport, opts: { withDevice?: boolean }
   const nothingCounted =
     report.ok && report.passed + report.failed + report.errored + report.skipped === 0;
   const note = nothingCounted ? " (no test steps)" : "";
-  return `${report.ok ? "PASS" : "FAIL"}${where} — ${report.passed} passed, ${report.failed} failed, ${report.errored} errored, ${report.skipped} skipped${warningsNote}${note}`;
+  return `${report.ok ? "PASS" : "FAIL"}${where} — ${report.passed} passed, ${report.failed} failed, ${report.errored} errored, ${report.skipped} skipped${warningsNote}${note}${durationSuffix(report.durationMs)}`;
 }
 
 /**
@@ -352,13 +363,16 @@ export function renderFailedSteps(report: FlowReport): string[] {
 }
 
 /** Flow-level verdict of a directory run, mirroring renderSummary's shape. */
-export function renderBatchSummary(counts: {
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
-}): string {
-  return `${counts.failed === 0 ? "PASS" : "FAIL"} — ${counts.total} flow${counts.total === 1 ? "" : "s"}: ${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped`;
+export function renderBatchSummary(
+  counts: {
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+  },
+  durationMs?: number
+): string {
+  return `${counts.failed === 0 ? "PASS" : "FAIL"} — ${counts.total} flow${counts.total === 1 ? "" : "s"}: ${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped${durationSuffix(durationMs)}`;
 }
 
 /**
@@ -1099,6 +1113,7 @@ async function runFlowDirectory(
 
   const outputBase = args.output ? path.resolve(args.output) : undefined;
   const results: BatchFlowResult[] = [];
+  const batchStartedAt = Date.now();
   // A validation rejection is scoped to the one call, so the batch keeps
   // going. Anything the server does not mark that way — another kind, or none
   // at all — stops it, as does a transport throw: each remaining flow would
@@ -1171,10 +1186,13 @@ async function runFlowDirectory(
     failed: results.filter((r) => r.status === "fail").length,
     skipped: results.filter((r) => r.status === "skip").length,
   };
+  const durationMs = Date.now() - batchStartedAt;
   if (args.json) {
-    console.log(JSON.stringify({ ok: counts.failed === 0, ...counts, flows: results }, null, 2));
+    console.log(
+      JSON.stringify({ ok: counts.failed === 0, ...counts, durationMs, flows: results }, null, 2)
+    );
   } else {
-    console.log(`\n${renderBatchSummary(counts)}`);
+    console.log(`\n${renderBatchSummary(counts, durationMs)}`);
   }
   return exitAfterFlush(counts.failed === 0 ? 0 : 1);
 }
